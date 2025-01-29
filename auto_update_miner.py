@@ -3,12 +3,17 @@ import os
 import sys
 import logging
 import importlib
+import configparser
 from typing import Optional
 
 # Define repository and script paths
 REPO_PATH = os.path.dirname(os.path.abspath(__file__))
 MAIN_SCRIPT_PATH = "neurons/miner.py"
-BRANCH = 'main'
+
+# Load configuration
+config = configparser.ConfigParser()
+config.read(os.path.join(REPO_PATH, 'config.ini'))
+BRANCH = config.get('settings', 'branch', fallback='main')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -47,7 +52,6 @@ def get_remote_version() -> Optional[str]:
     
     try:
         remote = f"origin/{BRANCH}:dml/chain/__init__.py"
-        print(remote)
         remote_content = run_git_command(['show', remote])
         if remote_content is None:
             return None
@@ -92,6 +96,7 @@ def run_main_script():
         logging.error(f"Error executing main script: {e}")
         return False
     return True
+
 def install_packages():
     """Runs pip install -e . to install the package in editable mode."""
     try:
