@@ -3,17 +3,12 @@ import os
 import sys
 import logging
 import importlib
-import configparser
 from typing import Optional
 
 # Define repository and script paths
 REPO_PATH = os.path.dirname(os.path.abspath(__file__))
 MAIN_SCRIPT_PATH = "neurons/miner.py"
-
-# Load configuration
-config = configparser.ConfigParser()
-config.read(os.path.join(REPO_PATH, 'config.ini'))
-BRANCH = config.get('settings', 'branch', fallback='main')
+BRANCH = 'main'  # Set branch directly in the script
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -100,72 +95,67 @@ def run_main_script():
 def install_packages():
     """Runs pip install -e . to install the package in editable mode."""
     try:
-        # Run the pip install -e . command
         result = subprocess.run(['pip', 'install', '-e', '.'], check=True, capture_output=True, text=True)
-        
-        # Print the output from the command
         logging.debug(result.stdout)
         logging.info("Package installed in editable mode successfully.")
-    
     except subprocess.CalledProcessError as e:
-        # Handle errors in case the command fails
         logging.error(f"Error occurred during installation: {e.stderr}")
+
+def check_and_update_versions():
+    """Check versions and update if necessary."""
+    local_version = get_local_version()
+    remote_version = get_remote_version()
+    current_branch = get_current_branch()
+
+    if not all([local_version, remote_version, current_branch]):
+        logging.error("Failed to retrieve necessary information.")
+        return False
+
+    logging.info(f"Local version: {local_version}")
+    logging.info(f"Remote version: {remote_version}")
+
+    update_performed = False
+
+    if int(local_version) != int(remote_version):
+        logging.info(f"New version detected on the {BRANCH} branch.")
+        
+        if current_branch != BRANCH:
+            logging.info(f"Currently on branch {current_branch}.")
+            
+            status = run_git_command(['status', '--porcelain'])
+            
+            if status:
+                logging.info("Uncommitted changes found, stashing them.")
+                if not stash_changes():
+                    raise Exception("Failed to stash changes.")
+
+            if not switch_to_branch(BRANCH):
+                raise Exception(f"Failed to switch to {BRANCH} branch.")
+            
+            if not update_repo():
+                raise Exception("Failed to update repository.")
+            
+            if not switch_to_branch(current_branch):
+                raise Exception(f"Failed to switch back to {current_branch} branch.")
+            
+            if status and not apply_stash():
+                raise Exception("Failed to apply stashed changes.")
+        else:
+            if not update_repo():
+                raise Exception("Failed to update repository.")
+        
+        logging.info("Update completed successfully.")
+        update_performed = True
+        install_packages()
+
+        logging.info("Restarting script with updated version...")
+        os.execv(sys.executable, ['python'] + sys.argv)
+
+    return not update_performed
 
 def main():
     try:
-        local_version = get_local_version()
-        remote_version = get_remote_version()
-        current_branch = get_current_branch()
-
-        if not all([local_version, remote_version, current_branch]):
-            logging.error("Failed to retrieve necessary information.")
-            return 1
-
-        logging.info(f"Local version: {local_version}")
-        logging.info(f"Remote version: {remote_version}")
-
-        update_performed = False
-
-        if int(local_version) != int(remote_version):
-            logging.info(f"New version detected on the {BRANCH} branch.")
-            
-            if current_branch != BRANCH:
-                logging.info(f"Currently on branch {current_branch}.")
-                
-                status = run_git_command(['status', '--porcelain'])
-                
-                if status:
-                    logging.info("Uncommitted changes found, stashing them.")
-                    if not stash_changes():
-                        raise Exception("Failed to stash changes.")
-
-                if not switch_to_branch(BRANCH):
-                    raise Exception(f"Failed to switch to {BRANCH} branch.")
-                
-                if not update_repo():
-                    raise Exception("Failed to update repository.")
-                
-                if not switch_to_branch(current_branch):
-                    raise Exception(f"Failed to switch back to {current_branch} branch.")
-                
-                if status and not apply_stash():
-                    raise Exception("Failed to apply stashed changes.")
-            else:
-                if not update_repo():
-                    raise Exception("Failed to update repository.")
-            
-            logging.info("Update completed successfully.")
-            update_performed = True
-            install_packages()
-
-            # Restart the script with the new version
-            logging.info("Restarting script with updated version...")
-            os.execv(sys.executable, ['python'] + sys.argv)
-        else:
-            logging.info("No update required.")
-
-        # Run the main script if no update was performed
-        if not update_performed and not run_main_script():
+        if check_and_update_versions() and not run_main_script():
             return 1
 
     except Exception as e:
